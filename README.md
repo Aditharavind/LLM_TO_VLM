@@ -30,7 +30,7 @@ python demos/demo_05_ablations.py     # break one piece at a time and watch it f
 
 Also open **`explainer.html`** in a browser — an interactive version of the same
 seven steps, good for teaching at a screen. Live copy:
-**https://claude.ai/code/artifact/f7abd88f-527a-4b9c-8b14-d6dfab624bc6**
+
 
 **She can drop in her own photo** (or drag it, or paste it) and watch that exact
 image move through every stage: it gets centre-cropped and resized the way a real
