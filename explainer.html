@@ -1,0 +1,1075 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>How an LLM Learns to See</title>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans+Condensed:wght@600;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+:root{
+  --paper:#f5f7f4; --surface:#ffffff; --sunk:#eceff1;
+  --ink:#10171b; --body:#2c3a42; --muted:#66787f; --line:#d2dcdf;
+  --pix:#d9600f; --pix-wash:#fbeadf;
+  --word:#137a8b; --word-wash:#e0f0f2;
+  --ok:#3b7d3a; --ok-wash:#e5f1df;
+  --sun:#b7790f; --sun-wash:#fff1c8;
+  --warn:#a3560d;
+  --shadow:0 1px 2px rgba(15,22,27,.06),0 8px 24px -12px rgba(15,22,27,.18);
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --paper:#0d1317; --surface:#141d22; --sunk:#101a1f;
+    --ink:#eaf1f3; --body:#c3d1d6; --muted:#8ba0a7; --line:#26343a;
+    --pix:#f0894a; --pix-wash:#2a1c12; --word:#4dc3d6; --word-wash:#0f272c;
+    --ok:#8ed07d; --ok-wash:#142716;
+    --sun:#f0c45e; --sun-wash:#2d2511;
+    --warn:#e3a45f;
+    --shadow:0 1px 2px rgba(0,0,0,.4),0 10px 28px -14px rgba(0,0,0,.7);
+  }
+}
+:root[data-theme="dark"]{
+  --paper:#0d1317; --surface:#141d22; --sunk:#101a1f;
+  --ink:#eaf1f3; --body:#c3d1d6; --muted:#8ba0a7; --line:#26343a;
+  --pix:#f0894a; --pix-wash:#2a1c12; --word:#4dc3d6; --word-wash:#0f272c;
+  --ok:#8ed07d; --ok-wash:#142716;
+  --sun:#f0c45e; --sun-wash:#2d2511;
+  --warn:#e3a45f;
+  --shadow:0 1px 2px rgba(0,0,0,.4),0 10px 28px -14px rgba(0,0,0,.7);
+}
+*{box-sizing:border-box}
+body{
+  margin:0; background:var(--paper); color:var(--body);
+  font-family:"IBM Plex Sans",system-ui,sans-serif; font-size:16px; line-height:1.6;
+  -webkit-font-smoothing:antialiased;
+}
+.wrap{max-width:1180px; margin:0 auto; padding-inline:20px; padding-block:0}
+h1,h2,h3{font-family:"IBM Plex Sans Condensed","IBM Plex Sans",sans-serif;
+  color:var(--ink); text-wrap:balance; margin:0; line-height:1.15}
+code,.mono,.shape{font-family:"IBM Plex Mono",ui-monospace,monospace}
+a{color:var(--word)}
+
+/* ---------- masthead ---------- */
+header.mast{padding-block:42px 30px; border-bottom:1px solid var(--line);
+  display:grid; grid-template-columns:minmax(0,1fr) minmax(300px,380px); gap:30px;
+  align-items:end}
+.eyebrow{font-family:"IBM Plex Mono",monospace; font-size:11.5px; letter-spacing:.14em;
+  text-transform:uppercase; color:var(--muted)}
+h1{font-size:clamp(38px,6vw,64px); font-weight:700; letter-spacing:0; margin-top:10px}
+h1 .pix{color:var(--pix)} h1 .word{color:var(--word)}
+.standfirst{max-width:64ch; margin-top:16px; font-size:18px}
+.mast-meta{display:flex; flex-wrap:wrap; gap:10px 22px; margin-top:22px;
+  font-family:"IBM Plex Mono",monospace; font-size:12px; color:var(--muted)}
+.mast-meta b{color:var(--ink); font-weight:600}
+.idea-board{background:var(--surface); border:1px solid var(--line); border-radius:8px;
+  padding:18px; box-shadow:var(--shadow)}
+.idea-label{font-family:"IBM Plex Mono",monospace; color:var(--muted); font-size:11px;
+  letter-spacing:.12em; text-transform:uppercase}
+.idea-main{font-family:"IBM Plex Sans Condensed","IBM Plex Sans",sans-serif;
+  color:var(--ink); font-weight:700; font-size:28px; line-height:1.05; margin-top:8px}
+.idea-flow{display:grid; grid-template-columns:1fr; gap:7px; margin-top:16px}
+.idea-step{display:flex; align-items:center; gap:8px; font-family:"IBM Plex Mono",monospace;
+  font-size:12px; color:var(--ink)}
+.idea-step i{display:block; width:18px; height:18px; border-radius:5px; border:1px solid var(--line)}
+.idea-step.pix i{background:var(--pix-wash); border-color:color-mix(in srgb,var(--pix) 28%,var(--line))}
+.idea-step.word i{background:var(--word-wash); border-color:color-mix(in srgb,var(--word) 28%,var(--line))}
+.idea-step.ok i{background:var(--ok-wash); border-color:color-mix(in srgb,var(--ok) 28%,var(--line))}
+.idea-small{font-size:13px; color:var(--muted); margin-top:14px}
+
+/* ---------- sticky rail ---------- */
+.rail{position:sticky; top:0; z-index:40; background:color-mix(in srgb,var(--paper) 88%, transparent);
+  backdrop-filter:blur(10px); border-bottom:1px solid var(--line)}
+.rail-inner{max-width:1180px; margin:0 auto; padding-inline:20px;
+  display:flex; gap:2px; overflow-x:auto; scrollbar-width:none}
+.rail-inner::-webkit-scrollbar{display:none}
+.rail a{flex:0 0 auto; display:flex; align-items:baseline; gap:7px; padding:11px 12px;
+  text-decoration:none; color:var(--muted); font-size:13px; border-bottom:2px solid transparent;
+  white-space:nowrap}
+.rail a .n{font-family:"IBM Plex Mono",monospace; font-size:11px; opacity:.75}
+.rail a:hover{color:var(--ink)}
+.rail a.on{color:var(--ink); border-bottom-color:var(--pix)}
+.rail a.on.lang{border-bottom-color:var(--word)}
+
+/* ---------- stages ---------- */
+.stage{padding-block:52px; border-bottom:1px solid var(--line); scroll-margin-top:54px}
+.stage-head{display:flex; gap:16px; align-items:flex-start; margin-bottom:6px}
+.stage-num{font-family:"IBM Plex Mono",monospace; font-size:12px; font-weight:600;
+  color:var(--pix); min-width:34px; height:34px; border:1px solid var(--line);
+  border-radius:999px; display:grid; place-items:center; background:var(--surface);
+  box-shadow:var(--shadow)}
+.stage.lang .stage-num{color:var(--word)}
+.stage h2{font-size:clamp(23px,3.4vw,31px); font-weight:600; letter-spacing:-.012em}
+.kicker{color:var(--muted); font-size:14px; margin-top:4px}
+.cols{display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1.15fr); gap:34px; margin-top:26px; align-items:start}
+.prose p{margin:0 0 14px; max-width:60ch}
+.prose p:last-child{margin-bottom:0}
+.prose strong{color:var(--ink); font-weight:600}
+
+/* ---------- panel ---------- */
+.panel{background:var(--surface); border:1px solid var(--line); border-radius:8px;
+  padding:18px; box-shadow:var(--shadow)}
+.panel + .panel{margin-top:14px}
+.panel-label{font-family:"IBM Plex Mono",monospace; font-size:11px; letter-spacing:.1em;
+  text-transform:uppercase; color:var(--muted); margin-bottom:12px}
+
+/* ---------- controls ---------- */
+.controls{display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-bottom:14px}
+button,.seg{font:inherit; font-size:13px; cursor:pointer; border-radius:8px;
+  border:1px solid var(--line); background:var(--surface); color:var(--body); padding:6px 11px}
+button:hover{border-color:var(--muted); color:var(--ink)}
+button.on{background:var(--ink); border-color:var(--ink); color:var(--paper)}
+button:focus-visible,a:focus-visible,input:focus-visible{outline:2px solid var(--pix); outline-offset:2px}
+.seg{display:inline-flex; padding:3px; gap:3px; background:var(--sunk)}
+.seg button{border:0; background:transparent; padding:5px 10px; border-radius:5px}
+.seg button.on{background:var(--surface); color:var(--ink); box-shadow:0 1px 2px rgba(0,0,0,.12)}
+label.ctl{font-size:13px; color:var(--muted); display:inline-flex; align-items:center; gap:7px}
+input[type=range]{accent-color:var(--pix); width:120px}
+
+/* ---------- canvases & tiles ---------- */
+canvas{display:block; image-rendering:pixelated; max-width:100%}
+.imgbox{border:1px solid var(--line); border-radius:6px; overflow:hidden; background:var(--sunk);
+  width:224px; height:224px; position:relative; flex:0 0 auto}
+.imgbox canvas{width:224px; height:224px}
+.gridlines{position:absolute; inset:0; pointer-events:none}
+.row{display:flex; gap:18px; flex-wrap:wrap; align-items:flex-start}
+
+#explode{position:relative; width:100%; max-width:340px; aspect-ratio:1; margin-inline:auto}
+#explode .tile{position:absolute; border-radius:2px; transition:all .62s cubic-bezier(.7,.02,.2,1);
+  outline:0 solid var(--pix); cursor:pointer}
+#explode .tile.hot{outline-width:2px; z-index:5}
+#explode .tile canvas{width:100%; height:100%}
+
+.strip{display:flex; gap:3px; overflow-x:auto; padding:10px 2px 12px}
+.strip .cell{flex:0 0 auto; width:38px; text-align:center}
+.strip .cell canvas{width:38px; height:38px; border-radius:2px; border:1px solid var(--line)}
+.strip .cell .ix{font-family:"IBM Plex Mono",monospace; font-size:9.5px; color:var(--muted); margin-top:3px}
+.strip .cell.hot canvas{border-color:var(--pix); box-shadow:0 0 0 2px var(--pix-wash)}
+
+/* ---------- shape/flow chips ---------- */
+.shape{display:inline-block; font-size:12.5px; padding:2px 7px; border-radius:5px;
+  background:var(--sunk); color:var(--ink); border:1px solid var(--line); white-space:nowrap}
+.flow{display:flex; align-items:center; gap:9px; flex-wrap:wrap; font-size:13px; margin-top:4px}
+.flow .arw{color:var(--muted); font-family:"IBM Plex Mono",monospace}
+.note{font-size:13px; color:var(--muted); margin-top:12px; padding-left:11px;
+  border-left:2px solid var(--line)}
+.note.warn{border-left-color:var(--warn); color:var(--warn)}
+.kid{border-left-color:var(--ok); background:var(--ok-wash); color:var(--ink);
+  padding:10px 12px; border-radius:0 8px 8px 0}
+.try{border-left-color:var(--sun); background:var(--sun-wash); color:var(--ink);
+  padding:10px 12px; border-radius:0 8px 8px 0}
+.try b,.kid b{color:var(--ink)}
+
+/* ---------- matrices ---------- */
+.mgrid{display:grid; gap:2px}
+.mgrid .c{aspect-ratio:1; border-radius:2px; display:grid; place-items:center;
+  font-family:"IBM Plex Mono",monospace; font-size:10px; cursor:pointer}
+.heads{display:grid; grid-template-columns:repeat(4,1fr); gap:12px}
+.headcard .hl{font-family:"IBM Plex Mono",monospace; font-size:10.5px; color:var(--muted);
+  text-align:center; margin-bottom:5px}
+
+/* ---------- token sequence ---------- */
+.seq{display:flex; flex-wrap:wrap; gap:4px}
+.tok{font-family:"IBM Plex Mono",monospace; font-size:11px; padding:5px 6px; border-radius:5px;
+  border:1px solid transparent; cursor:pointer; text-align:center; min-width:34px; line-height:1.25}
+.tok .p{display:block; font-size:8.5px; opacity:.6}
+.tok.img{background:var(--pix-wash); color:var(--pix); border-color:color-mix(in srgb,var(--pix) 30%,transparent)}
+.tok.txt{background:var(--word-wash); color:var(--word); border-color:color-mix(in srgb,var(--word) 30%,transparent)}
+.tok.dim{opacity:.25}
+.tok.sel{outline:2px solid var(--ink); outline-offset:1px}
+
+/* ---------- bridge diagram ---------- */
+.bridge{position:relative; display:grid; grid-template-columns:1fr 78px 1fr; gap:0; align-items:center}
+.bcol{display:flex; flex-direction:column; gap:4px}
+.bvec{display:flex; gap:1px; align-items:center}
+.bvec .lb{font-family:"IBM Plex Mono",monospace; font-size:9px; color:var(--muted); width:30px; flex:0 0 30px}
+.bvec .bars{display:flex; gap:1px; height:13px; flex:1}
+.bvec .bars i{flex:1; border-radius:1px}
+#blines{position:absolute; inset:0; width:100%; height:100%; pointer-events:none}
+
+/* ---------- upload ---------- */
+.drop{display:block; cursor:pointer; border:1.5px dashed var(--line); border-radius:8px;
+  padding:16px 14px; text-align:center; background:var(--sunk);
+  transition:border-color .15s, background .15s}
+.drop:hover{border-color:var(--muted)}
+.drop.over{border-color:var(--pix); background:var(--pix-wash)}
+.drop .big{font-size:13.5px; color:var(--ink); font-weight:500}
+.drop .sm{font-size:11.5px; color:var(--muted); margin-top:3px}
+.drop input[type=file]{display:none}
+.capwrap{display:flex; align-items:center; gap:9px; margin-top:12px; flex-wrap:wrap}
+.capwrap input[type=text]{font:inherit; font-size:13px; padding:6px 10px; flex:1; min-width:190px;
+  border:1px solid var(--line); border-radius:7px; background:var(--surface); color:var(--ink)}
+.privacy{font-size:11.5px; color:var(--muted); margin-top:9px;
+  font-family:"IBM Plex Mono",monospace}
+.seg button[disabled]{opacity:.35; cursor:not-allowed}
+
+/* ---------- table ---------- */
+.tblwrap{overflow-x:auto}
+table{border-collapse:collapse; width:100%; font-size:13.5px}
+th,td{text-align:left; padding:9px 12px; border-bottom:1px solid var(--line)}
+th{font-family:"IBM Plex Mono",monospace; font-size:11px; letter-spacing:.08em;
+  text-transform:uppercase; color:var(--muted); font-weight:500}
+td.m{font-family:"IBM Plex Mono",monospace; font-size:12.5px; color:var(--ink);
+  font-variant-numeric:tabular-nums}
+
+footer{padding-block:40px 60px; color:var(--muted); font-size:13.5px}
+footer .files{display:grid; grid-template-columns:repeat(auto-fit,minmax(210px,1fr)); gap:8px 22px; margin-top:14px}
+footer .files div{font-family:"IBM Plex Mono",monospace; font-size:12px}
+footer .files b{color:var(--ink); font-weight:500}
+
+@media (max-width:900px){
+  header.mast{grid-template-columns:1fr; align-items:start}
+  .idea-board{max-width:560px}
+}
+@media (max-width:820px){ .cols{grid-template-columns:1fr; gap:22px} .heads{grid-template-columns:repeat(2,1fr)} }
+@media (max-width:560px){
+  .stage-head{gap:10px}
+  .stage-num{min-width:30px;height:30px}
+  .imgbox,.imgbox canvas{width:100%;height:auto;aspect-ratio:1}
+}
+@media (prefers-reduced-motion:reduce){ *{transition:none!important; animation:none!important} }
+</style>
+</head>
+<body>
+
+<div class="rail"><nav class="rail-inner" id="rail"></nav></div>
+
+<div class="wrap">
+<header class="mast">
+  <div>
+    <div class="eyebrow">Interactive classroom · vision-language models</div>
+    <h1>How an LLM Learns to <span class="pix">See</span> and <span class="word">Answer</span></h1>
+    <p class="standfirst">A language model only understands vectors, like little number
+    messages. To turn it into a VLM, we do not rebuild the LLM. We turn a picture into
+    picture tokens, translate them into the LLM's vector language, and place them before
+    the words.</p>
+    <div class="mast-meta">
+      <span>image <b id="m-img">64×64</b></span><span>patch <b id="m-patch">16×16</b></span>
+      <span>picture tokens <b id="m-n">16</b></span><span>ViT width <b>64</b></span>
+      <span>LLM width <b>128</b></span><span>try it: <b>click, drag, type</b></span>
+    </div>
+  </div>
+  <div class="idea-board" aria-label="Big idea">
+    <div class="idea-label">the whole trick</div>
+    <div class="idea-main">Picture pieces become pretend word tokens.</div>
+    <div class="idea-flow">
+      <div class="idea-step pix"><i></i><span>1. cut image into patches</span></div>
+      <div class="idea-step pix"><i></i><span>2. make one vector per patch</span></div>
+      <div class="idea-step word"><i></i><span>3. translate to LLM width</span></div>
+      <div class="idea-step ok"><i></i><span>4. paste before the caption words</span></div>
+    </div>
+    <div class="idea-small">The LLM then predicts text the normal way. It just has extra
+    tokens at the front that came from the picture.</div>
+  </div>
+</header>
+</div>
+
+<main class="wrap" id="main"></main>
+
+<div class="wrap"><footer>
+  <div>This page mirrors a runnable PyTorch repo — each stage is one file, in order.</div>
+  <div class="files">
+    <div><b>step1_patchify.py</b> — image → patches</div>
+    <div><b>step2_patch_embed.py</b> — patches → vectors</div>
+    <div><b>step3_attention.py</b> — multi-head attention</div>
+    <div><b>step4_vit.py</b> — the ViT encoder</div>
+    <div><b>step5_projector.py</b> — the bridge</div>
+    <div><b>step6_tiny_llm.py</b> — the causal LLM</div>
+    <div><b>step7_vlm.py</b> — the join</div>
+  </div>
+</footer></div>
+
+<script>
+/* ============================================================
+   Toy images, drawn in the browser exactly like vlm/data.py
+   ============================================================ */
+let S = 64;                       // the square the model works on (changeable)
+const BG = [245,245,248];
+const PRESETS = [
+  {color:"red",    rgb:[220,50,50],  shape:"circle",   quad:[0,0], words:["a","red","circle","in","the","top","left"]},
+  {color:"blue",   rgb:[60,100,220], shape:"square",   quad:[1,1], words:["a","blue","square","in","the","bottom","right"]},
+  {color:"green",  rgb:[60,180,75],  shape:"triangle", quad:[0,1], words:["a","green","triangle","in","the","top","right"]},
+  {color:"yellow", rgb:[240,200,40], shape:"circle",   quad:[1,0], words:["a","yellow","circle","in","the","bottom","left"]},
+];
+
+function drawScene(ctx, p){
+  ctx.fillStyle = `rgb(${BG})`; ctx.fillRect(0,0,S,S);
+  const half=S/2, cx=p.quad[1]*half+half/2, cy=p.quad[0]*half+half/2, r=11;
+  ctx.fillStyle = `rgb(${p.rgb})`;
+  ctx.beginPath();
+  if(p.shape==="circle") ctx.arc(cx,cy,r,0,Math.PI*2);
+  else if(p.shape==="square") ctx.rect(cx-r,cy-r,2*r,2*r);
+  else { ctx.moveTo(cx,cy-r); ctx.lineTo(cx-r,cy+r); ctx.lineTo(cx+r,cy+r); ctx.closePath(); }
+  ctx.fill();
+}
+const src = document.createElement("canvas"); src.width=src.height=S;
+const sctx = src.getContext("2d", {willReadFrequently:true});
+let PIX = null;                 // Uint8ClampedArray of the current image
+let UPLOAD = null;              // an <img> the user supplied, or null
+
+/** Centre-crop to a square, then resize down to S x S.
+    Real VLMs do exactly this in their image preprocessor -- the model has one
+    fixed input size, so every photo gets squashed into it before anything else. */
+function drawUpload(ctx, img){
+  const side = Math.min(img.naturalWidth, img.naturalHeight);
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = "high";
+  ctx.clearRect(0,0,S,S);
+  ctx.drawImage(img, (img.naturalWidth-side)/2, (img.naturalHeight-side)/2,
+                side, side, 0, 0, S, S);
+}
+function renderSource(){
+  if(src.width !== S){ src.width = src.height = S; }
+  if(UPLOAD) drawUpload(sctx, UPLOAD);
+  else drawScene(sctx, PRESETS[state.preset]);
+  PIX = sctx.getImageData(0,0,S,S).data;
+}
+
+/* ============================================================
+   State
+   ============================================================ */
+const state = { preset:0, patch:16, exploded:false, hot:-1, addPos:true,
+                head:0, query:5, connector:"mlp" };
+
+/** The caption the user typed, split into word tokens. Our toy tokenizer is
+    word-level, so one word = one token; a real BPE would split some of these
+    into pieces, which only changes the count, not the idea. */
+function captionWords(){
+  const raw = (document.getElementById("capIn")?.value || "").trim();
+  return raw ? raw.split(/\s+/).slice(0, 24) : [];
+}
+const G = () => S/state.patch;                // patches along one side
+const N = () => G()*G();                      // total patches = sequence length
+const d3 = () => state.patch*state.patch*3;   // numbers in one flattened patch
+
+/* ---- helpers ---------------------------------------------------------- */
+function patchCanvas(idx, px){
+  const g=G(), p=state.patch, r=Math.floor(idx/g), c=idx%g;
+  const cv=document.createElement("canvas"); cv.width=cv.height=p;
+  cv.getContext("2d").drawImage(src, c*p, r*p, p, p, 0, 0, p, p);
+  if(px){ cv.style.width=px+"px"; cv.style.height=px+"px"; }
+  return cv;
+}
+// mean RGB of a patch, scaled to [-1,1] like the tensors in the repo
+function patchMean(idx){
+  const g=G(), p=state.patch, r=Math.floor(idx/g), c=idx%g;
+  let a=[0,0,0];
+  for(let y=0;y<p;y++) for(let x=0;x<p;x++){
+    const o=((r*p+y)*S + (c*p+x))*4;
+    a[0]+=PIX[o]; a[1]+=PIX[o+1]; a[2]+=PIX[o+2];
+  }
+  return a.map(v => (v/(p*p)/255 - .5)/.5);
+}
+// a 12-d "feature" per patch: 2x2 sub-blocks x RGB. Same spirit as the Linear layer.
+function patchFeature(idx){
+  const g=G(), p=state.patch, r=Math.floor(idx/g), c=idx%g, h=p/2, f=[];
+  for(let by=0;by<2;by++) for(let bx=0;bx<2;bx++){
+    let a=[0,0,0];
+    for(let y=0;y<h;y++) for(let x=0;x<h;x++){
+      const o=((r*p+by*h+y)*S + (c*p+bx*h+x))*4;
+      a[0]+=PIX[o]; a[1]+=PIX[o+1]; a[2]+=PIX[o+2];
+    }
+    f.push(...a.map(v=>(v/(h*h)/255-.5)/.5));
+  }
+  return f;
+}
+function posFeature(idx){                // sinusoidal stand-in for a learned pos embed
+  const g=G(), r=Math.floor(idx/g), c=idx%g, v=[];
+  for(let k=0;k<6;k++){ v.push(Math.sin((r+1)*(k+1)*0.9), Math.cos((c+1)*(k+1)*0.9)); }
+  return v;
+}
+function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);
+  t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};}
+function randMat(rows,cols,seed){const rnd=mulberry32(seed),m=[];
+  for(let i=0;i<rows;i++){const r=[];for(let j=0;j<cols;j++)r.push((rnd()*2-1)*0.9);m.push(r);}return m;}
+const matvec=(M,v)=>M.map(row=>row.reduce((s,w,i)=>s+w*v[i],0));
+const dot=(a,b)=>a.reduce((s,v,i)=>s+v*b[i],0);
+function softmax(xs){const m=Math.max(...xs), e=xs.map(x=>Math.exp(x-m)), s=e.reduce((a,b)=>a+b,0);
+  return e.map(v=>v/s);}
+
+const DH = 8, HEADS = 4;
+const WQ=[], WK=[];
+for(let h=0;h<HEADS;h++){ WQ.push(randMat(DH,12,1000+h)); WK.push(randMat(DH,12,2000+h)); }
+
+/** Real attention mechanics on toy weights: scores = q·k/sqrt(dh), then softmax. */
+function attention(head){
+  const n=N(), feats=[];
+  for(let i=0;i<n;i++){
+    const f=patchFeature(i), p=posFeature(i);
+    feats.push(state.addPos ? f.map((v,k)=>v+0.55*p[k]) : f);
+  }
+  const q=feats.map(f=>matvec(WQ[head],f)), k=feats.map(f=>matvec(WK[head],f));
+  return q.map(qi => softmax(k.map(kj => dot(qi,kj)/Math.sqrt(DH))));
+}
+function heatColor(t){                    // 0..1 -> amber ramp that works on both grounds
+  const c=[[248,250,250],[250,224,196],[240,163,92],[201,96,16],[120,45,8]];
+  const x=Math.max(0,Math.min(.999,t))*(c.length-1), i=Math.floor(x), f=x-i;
+  const a=c[i], b=c[i+1];
+  return `rgb(${a.map((v,j)=>Math.round(v+(b[j]-v)*f)).join(",")})`;
+}
+
+/* ============================================================
+   Page structure
+   ============================================================ */
+const STAGES = [
+  {id:"picture",  n:"00", t:"Pick the picture the model must describe", k:"64 × 64 × 3 = 12,288 little colour numbers", lang:false},
+  {id:"patchify", n:"01", t:"Cut the picture into tiles",               k:"step1_patchify.py — just moving pixels around", lang:false},
+  {id:"embed",    n:"02", t:"Turn each tile into a picture token",       k:"step2_patch_embed.py — pixels become vectors", lang:false},
+  {id:"attention",n:"03", t:"Let the picture tokens look around",        k:"step3_attention.py — four attention heads at once", lang:false},
+  {id:"vit",      n:"04", t:"Stack the blocks: this is the ViT",         k:"step4_vit.py — the vision brain", lang:false},
+  {id:"bridge",   n:"05", t:"Translate vision tokens into LLM language", k:"step5_projector.py — the line that makes it a VLM", lang:true},
+  {id:"join",     n:"06", t:"Paste image tokens before word tokens",     k:"step7_vlm.py — one sequence, two origins", lang:true},
+  {id:"recap",    n:"07", t:"Remember the recipe",                      k:"the whiteboard version", lang:true},
+];
+const rail=document.getElementById("rail");
+STAGES.forEach(s=>{ const a=document.createElement("a");
+  a.href="#"+s.id; a.dataset.id=s.id; a.className=s.lang?"lang":"";
+  a.innerHTML=`<span class="n">${s.n}</span><span>${s.t.split(":")[0].split("—")[0].trim()}</span>`;
+  rail.appendChild(a); });
+
+const main=document.getElementById("main");
+function stage(s, prose, visual){
+  const el=document.createElement("section");
+  el.className="stage"+(s.lang?" lang":""); el.id=s.id;
+  el.innerHTML=`<div class="stage-head"><div class="stage-num">${s.n}</div>
+    <div><h2>${s.t}</h2><div class="kicker" id="k-${s.id}">${s.k}</div></div></div>
+    <div class="cols"><div class="prose">${prose}</div><div class="vis">${visual}</div></div>`;
+  main.appendChild(el); return el;
+}
+const S0=STAGES[0],S1=STAGES[1],S2=STAGES[2],S3=STAGES[3],S4=STAGES[4],S5=STAGES[5],S6=STAGES[6],S7=STAGES[7];
+
+/* ---- 00 picture ------------------------------------------------------- */
+stage(S0, `
+<p>Start with a tiny picture: one coloured shape in one corner. The caption
+<em>"a red circle in the top left"</em> cannot be guessed from text alone, so the model has
+to actually <strong>look</strong> to get the colour, shape, and place right.</p>
+<p class="kid"><b>Kid version:</b> this is a puzzle. The words are hidden in the picture,
+and the model has to turn the picture into clues the LLM can read.</p>
+<p>Choose a toy picture, drop in your own image, and change the patch size. Every panel
+below updates from the picture on screen.</p>`,
+`<div class="panel">
+  <div class="panel-label">bring your own picture</div>
+  <label class="drop" id="drop" for="fileIn">
+    <div class="big">Drop an image, click to choose, or paste from the clipboard</div>
+    <div class="sm">the browser resizes it to the square the model expects</div>
+    <input type="file" id="fileIn" accept="image/*">
+  </label>
+  <div class="privacy">your image is read in this browser tab and never uploaded anywhere</div>
+
+  <div class="panel-label" style="margin-top:18px">or use a classroom picture</div>
+  <div class="controls" id="presetCtl"></div>
+
+  <div class="controls" style="margin-top:14px">
+    <label class="ctl">resolution</label>
+    <div class="seg" id="sizeSel">
+      <button data-s="64">64²</button><button data-s="96">96²</button><button data-s="128">128²</button>
+    </div>
+    <label class="ctl" style="margin-left:6px">patch size</label>
+    <div class="seg" id="patchSel">
+      <button data-p="8">8 px</button><button data-p="16">16 px</button><button data-p="32">32 px</button>
+    </div>
+  </div>
+  <div class="row">
+    <div class="imgbox"><canvas id="mainImg" width="64" height="64"></canvas>
+      <svg class="gridlines" id="mainGrid" viewBox="0 0 64 64"></svg></div>
+    <div style="flex:1;min-width:210px">
+      <div class="flow"><span class="shape" id="sh-img">[3, 64, 64]</span></div>
+      <div class="note" id="patchNote"></div>
+      <div class="capwrap">
+        <label class="ctl" for="capIn">caption</label>
+        <input type="text" id="capIn" value="a red circle in the top left">
+      </div>
+      <div class="note try"><b>Try it:</b> write the answer you want the model to learn.
+      Those words become the text half of the sequence in step 06.</div>
+    </div>
+  </div>
+</div>`);
+
+/* ---- 01 patchify ------------------------------------------------------ */
+stage(S1, `
+<p>A transformer wants a <strong>row of tokens</strong>, not a square picture. So the first
+job is simple: chop the picture into tiles and lay them out like reading a book, left to
+right and top to bottom.</p>
+<p class="kid"><b>Nothing smart has happened yet.</b> The pixels are not changed, only
+rearranged. <code>unpatchify</code> can put the picture back exactly.</p>
+<p>Why not one pixel per token? Because <span id="w-px">64×64 would be 4,096</span> tokens,
+and attention costs O(n²). One patch per token is <span id="w-n">16</span>.
+<strong>Patch size is the dial between detail and cost</strong> — change it above and
+watch this sentence change with it.</p>`,
+`<div class="panel">
+  <div class="panel-label">the patch grid</div>
+  <div class="controls">
+    <button id="explodeBtn">explode / reassemble</button>
+    <span class="shape" id="sh-patches">[16, 768]</span>
+  </div>
+  <div id="explode"></div>
+</div>
+<div class="panel">
+  <div class="panel-label">then laid out as a sequence — hover to link them</div>
+  <div class="strip" id="strip"></div>
+  <div class="note try"><b>Try it:</b> hover a tile. The square picture and the token row
+  light up together, because they are the same pixels in two shapes.</div>
+</div>`);
+
+/* ---- 02 embed --------------------------------------------------------- */
+stage(S2, `
+<p>Each tile is still raw pixels — <span class="shape" id="w-dim">16×16×3 = 768</span>
+numbers. To an LLM, that is still noise. We need to turn each tile into a neat vector.</p>
+<p><strong>First: pixels become features.</strong> One
+<code><span id="w-lin">Linear(768 → 64)</span></code> fixes that: raw pixel values in, a
+64-dim feature vector out. (Real ViTs write this as a
+<code>Conv2d</code> with kernel = stride = patch size. It's the same arithmetic — the repo
+asserts the two agree.)</p>
+<p><strong>Second: the token needs a seat number.</strong> Attention is
+permutation-invariant: shuffle the patches and it genuinely cannot tell. So we add a
+learned <strong>position embedding</strong> — one vector per slot, meaning
+"this is slot 0", "this is slot 1".</p>
+<p class="note kid">picture token = what the tile looks like <em>+</em> where the tile was. That
+plus sign is the entire reason a model can say "top left".</p>`,
+`<div class="panel">
+  <div class="panel-label">one tile, all the way to a token</div>
+  <div class="controls">
+    <label class="ctl">patch <input type="range" id="pickPatch" min="0" max="15" value="5"></label>
+    <span class="shape" id="pickLbl">#5</span>
+  </div>
+  <div class="row" style="align-items:center">
+    <div id="pickBox" style="width:96px;height:96px;border:1px solid var(--line);border-radius:4px;overflow:hidden"></div>
+    <div style="flex:1;min-width:220px">
+      <div class="panel-label" style="margin:0 0 6px"><span id="w-raw">768</span> raw pixel values</div>
+      <canvas id="rawWave" width="360" height="46" style="width:100%;height:46px;image-rendering:auto"></canvas>
+      <div class="panel-label" style="margin:12px 0 6px">after Linear → 64 features</div>
+      <div class="bvec"><div class="bars" id="featBars" style="height:26px"></div></div>
+      <div class="panel-label" style="margin:12px 0 6px">+ position embedding for this slot</div>
+      <div class="bvec"><div class="bars" id="posBars" style="height:26px"></div></div>
+    </div>
+  </div>
+  <div class="flow" style="margin-top:14px">
+    <span class="shape" id="w-flow">[768]</span><span class="arw">→ Linear →</span>
+    <span class="shape">[64]</span><span class="arw">+ pos →</span>
+    <span class="shape">[64] one vision token</span>
+  </div>
+</div>`);
+
+/* ---- 03 attention ----------------------------------------------------- */
+stage(S3, `
+<p>Now the picture tokens get to look at each other. Every token asks a question
+(<strong>Q</strong>), advertises what it holds (<strong>K</strong>), and offers content
+(<strong>V</strong>). Each token then takes a weighted average of everyone's V, where the
+weights come from how well its Q matches their K.</p>
+<p class="mono" style="font-size:13px;color:var(--ink)">scores = Q·Kᵀ / √d<br>
+weights = softmax(scores) &nbsp;<span style="color:var(--muted)">← each row sums to 1</span><br>
+out = weights · V</p>
+<p><strong>Why <em>multi</em>-head?</strong> One attention map can notice one kind
+of relationship. So we split the 64-dim vector into 4 chunks of 16 and run four
+attentions side by side. One head can learn "look at tiles of my colour", another
+"look near me". Same cost, four opinions — then glue them together.</p>
+<p>Click any patch to make it the <strong>query</strong>. The four grids show where each
+head sends that patch's attention. Switch position embeddings off and watch identical
+background tiles become hard to tell apart.</p>`,
+`<div class="panel">
+  <div class="panel-label">where does one tile look?</div>
+  <div class="controls">
+    <button id="posToggle" class="on">position embeddings: on</button>
+    <span class="shape" id="sh-attn">attn [4, 16, 16]</span>
+  </div>
+  <div class="row">
+    <div>
+      <div class="panel-label">click to pick the query</div>
+      <div class="imgbox" style="width:150px;height:150px">
+        <canvas id="attImg" width="64" height="64" style="width:150px;height:150px"></canvas>
+        <svg class="gridlines" id="attGrid" viewBox="0 0 64 64" style="cursor:crosshair"></svg>
+      </div>
+    </div>
+    <div style="flex:1;min-width:240px">
+      <div class="heads" id="heads"></div>
+    </div>
+  </div>
+  <div class="note" id="attNote"></div>
+</div>`);
+
+/* ---- 04 vit ----------------------------------------------------------- */
+stage(S4, `
+<p>A transformer block is only two ideas glued together, each wrapped in a residual:</p>
+<p class="mono" style="font-size:13px;color:var(--ink)">x = x + Attention(LayerNorm(x))
+<span style="color:var(--muted)">&nbsp;← tokens TALK</span><br>
+x = x + MLP(LayerNorm(x))
+<span style="color:var(--muted)">&nbsp;← each token THINKS alone</span></p>
+<p>Attention is the <em>only</em> place information moves between tiles; the MLP
+processes every token on its own. <code>x = x + …</code> means each block <strong>edits</strong>
+the token rather than replacing it, which is what lets you stack four of them — or forty —
+without the signal dying.</p>
+<p>Out the other end: still <span id="w-vit-n">16</span> vectors, still 64-dim. But patch 0
+no longer means "the top-left <span id="w-vit-p">16×16</span> pixels". It means <strong>"the top-left region, in the context of
+everything else in this image"</strong>. Same shape, much smarter contents.</p>`,
+`<div class="panel">
+  <div class="panel-label">four blocks, shape unchanged throughout</div>
+  <div id="blocks"></div>
+  <div class="note kid">Every arrow keeps <span class="shape" id="sh-vit-note">[16, 64]</span>. A transformer
+  does not change the row length here. It keeps rewriting what each token knows.</div>
+</div>`);
+
+/* ---- 05 bridge -------------------------------------------------------- */
+stage(S5, `
+<p>This is the conversion step, and it is smaller than people expect. The ViT speaks in
+64-dim vectors; the language model's word embeddings are 128-dim. Different languages, of
+different widths. The bridge translates.</p>
+<p><strong>MLP projector</strong> — <code>Linear → GELU → Linear</code>. One patch becomes
+one token. That is genuinely all LLaVA does. It keeps every patch's detail, but a real
+image can still send a lot of tokens to the LLM: 224×224 with 16×16 patches gives
+14×14 = <strong>196 image tokens</strong>; 224×224 with 14×14 patches gives
+16×16 = <strong>256 image tokens</strong>; 336×336 at patch 14 gives
+24×24 = <strong>576 image tokens</strong>. The MLP translates each one into the LLM's
+width, then the LLM reads all of them before the words.</p>
+<p><strong>Cross-attention resampler</strong> — keep a few <em>learned</em> query vectors
+(they're parameters; they don't depend on the image) and let them cross-attend to the
+patches: queries ask, the image supplies keys and values. <span id="w-resampler-in">16</span>
+patches in, eight tokens out — regardless of how many patches there were. Flamingo and BLIP-2's Q-Former work this
+way.</p>
+<p class="note kid"><b>Big idea:</b> after this bridge, the image vectors have the same width
+as word vectors. With the MLP projector, the token count stays the patch count:
+196 patches means 196 image tokens, 256 patches means 256 image tokens. The LLM can read
+them without knowing they came from pixels.</p>
+<p class="note">In the repo this module has ~25k parameters against the LLM's ~800k. In
+real VLM training it is often the <strong>only</strong> thing trained at first, with the
+ViT and the LLM both frozen.</p>`,
+`<div class="panel">
+  <div class="panel-label">vision tokens → LLM-shaped tokens</div>
+  <div class="controls">
+    <div class="seg" id="connSel">
+      <button data-c="mlp" class="on">MLP projector</button>
+      <button data-c="resampler">cross-attention resampler</button>
+    </div>
+  </div>
+  <div class="bridge" id="bridge">
+    <div class="bcol" id="bLeft"></div>
+    <div style="text-align:center;font-family:'IBM Plex Mono',monospace;font-size:10px;color:var(--muted)" id="bMid"></div>
+    <div class="bcol" id="bRight"></div>
+    <svg id="blines"></svg>
+  </div>
+  <div class="flow" style="margin-top:14px">
+    <span class="shape" id="sh-bridge-in">[16, 64]</span><span class="arw">→</span>
+    <span class="shape" id="sh-bridge">[16, 128]</span>
+  </div>
+  <div class="note" id="bridgeNote"></div>
+</div>`);
+
+/* ---- 06 join ---------------------------------------------------------- */
+stage(S6, `
+<p>Image tokens go in front, text tokens follow, and it is all <strong>one
+sequence</strong>. Three lines of tensor surgery:</p>
+<p class="mono" style="font-size:12.5px;color:var(--ink)">img = connector(vit(image))<br>
+txt = llm.embed_tokens(ids)<br>
+seq = torch.cat([img, txt], dim=1)</p>
+<p>Then <code>llm(inputs_embeds=seq)</code>. That keyword is the door: every real LLM
+exposes it, and it lets you hand the model vectors that never came from the embedding
+table at all.</p>
+<p>The language model has <strong>no idea</strong> the first block came from pixels. To it
+they are just vectors in positions <span id="w-img-range">0–15</span>, exactly like word vectors. Attention is
+<strong>causal</strong> — click any token to see what it's allowed to look at. Every text
+position can see the whole image; no image token can see the future.</p>
+<p class="kid"><b>Kid version:</b> the LLM reads the picture tokens first, then starts writing.
+When it predicts the next word, it can look back at the picture clues.</p>
+<p>Loss is ordinary next-token cross-entropy, on the <strong>text positions only</strong>.
+There is no correct "next token" for an image patch.</p>`,
+`<div class="panel">
+  <div class="panel-label">the sequence the LLM actually receives</div>
+  <div class="seq" id="seq"></div>
+  <div class="note" id="seqNote">Click a token to see its causal window.</div>
+</div>
+<div class="panel">
+  <div class="panel-label">what gets a loss</div>
+  <div class="seq" id="lossSeq"></div>
+  <div class="note">Grey = no gradient. The image block is never a prediction target, and
+  padding is ignored too.</div>
+</div>`);
+
+/* ---- 07 recap --------------------------------------------------------- */
+stage(S7, `
+<p>If a student remembers one thing, make it this: <strong>nothing about the language model
+changed.</strong> Same blocks, same causal mask, same next-token loss. We only widened
+what is allowed to sit in its input sequence.</p>
+<p class="kid"><b>Recipe:</b> image → tiles → picture vectors → LLM-width vectors → paste
+before words → predict the next word.</p>
+<p>And one honest caveat worth teaching on day one: feed the trained model a blank image
+and it still emits a confident, grammatical caption, because the language half has a
+strong prior about what captions look like. That is what
+<strong>hallucination</strong> is — a property of this architecture, not a bug in
+the code.</p>`,
+`<div class="panel">
+  <div class="panel-label">one image, end to end</div>
+  <div class="tblwrap"><table>
+    <thead><tr><th>stage</th><th>shape</th><th>what happened</th></tr></thead>
+    <tbody id="recap"></tbody>
+  </table></div>
+</div>`);
+
+/* ============================================================
+   Rendering
+   ============================================================ */
+function gridSvg(el, interactive){
+  const g=G(), p=state.patch; let h="";
+  el.setAttribute("viewBox", `0 0 ${S} ${S}`);
+  for(let i=1;i<g;i++) h+=`<line x1="0" y1="${i*p}" x2="${S}" y2="${i*p}" stroke="rgba(120,140,150,.75)" stroke-width="${S/128}"/>
+    <line x1="${i*p}" y1="0" x2="${i*p}" y2="${S}" stroke="rgba(120,140,150,.75)" stroke-width="${S/128}"/>`;
+  if(interactive) for(let i=0;i<g*g;i++){ const r=Math.floor(i/g), c=i%g;
+    h+=`<rect data-i="${i}" x="${c*p}" y="${r*p}" width="${p}" height="${p}" fill="transparent"
+      stroke="${i===state.query?'#d9600f':'transparent'}" stroke-width="${S/32}"/>`; }
+  el.innerHTML=h;
+}
+function renderPicture(){
+  const mi=document.getElementById("mainImg"), ai=document.getElementById("attImg");
+  [mi,ai].forEach(cv=>{ if(cv.width!==S){ cv.width=cv.height=S; } });
+  mi.getContext("2d").clearRect(0,0,S,S); mi.getContext("2d").drawImage(src,0,0);
+  ai.getContext("2d").clearRect(0,0,S,S);  ai.getContext("2d").drawImage(src,0,0);
+  gridSvg(document.getElementById("mainGrid"), false);
+  gridSvg(document.getElementById("attGrid"), true);
+
+  const p=state.patch, n=N();
+  document.getElementById("sh-img").textContent=`[3, ${S}, ${S}]`;
+  document.getElementById("k-picture").textContent =
+    `${S} × ${S} × 3 = ${(S*S*3).toLocaleString()} little colour numbers`;
+  document.getElementById("patchNote").innerHTML =
+    `A ${G()}×${G()} grid → <b>${n} patches</b>, each ${p}×${p}×3 = <b>${p*p*3}</b> numbers.
+     Sequence length for the transformer: <b>${n}</b>
+     — versus <b>${(S*S).toLocaleString()}</b> if you fed it one pixel per token.`;
+  document.getElementById("sh-patches").textContent=`[${n}, ${p*p*3}]`;
+  document.getElementById("sh-attn").textContent=`attn [4, ${n}, ${n}]`;
+  document.getElementById("sh-vit-note").textContent=`[${n}, 64]`;
+  document.getElementById("sh-bridge-in").textContent=`[${n}, 64]`;
+  document.getElementById("w-img-range").textContent=`0–${n-1}`;
+  document.getElementById("w-vit-n").textContent=n;
+  document.getElementById("w-vit-p").textContent=`${p}×${p}`;
+  document.getElementById("w-resampler-in").textContent=n;
+  document.getElementById("m-img").textContent=`${S}×${S}`;
+  document.getElementById("m-patch").textContent=`${p}×${p}`;
+  document.getElementById("m-n").textContent=n;
+
+  // the prose carries live numbers too, so nothing on the page contradicts
+  // the image the student actually loaded
+  document.getElementById("w-px").textContent=`${S}×${S} would be ${(S*S).toLocaleString()}`;
+  document.getElementById("w-n").textContent=n;
+  document.getElementById("w-dim").textContent=`${p}×${p}×3 = ${d3()}`;
+  document.getElementById("w-lin").textContent=`Linear(${d3()} → 64)`;
+  document.getElementById("w-raw").textContent=d3();
+  document.getElementById("w-flow").textContent=`[${d3()}]`;
+
+  document.querySelectorAll("#presetCtl button").forEach((b,i)=>
+    b.classList.toggle("on", !UPLOAD && i===state.preset));
+  document.querySelectorAll("#sizeSel button").forEach(b=>
+    b.classList.toggle("on", +b.dataset.s===S));
+  // A patch size is offered only when it divides the image AND keeps the
+  // sequence short enough to draw. That gate is the real O(n^2) tradeoff.
+  document.querySelectorAll("#patchSel button").forEach(b=>{
+    const pp=+b.dataset.p, ok = S%pp===0 && (S/pp)**2 <= 64;
+    b.disabled=!ok;
+    b.title = ok ? "" : (S%pp ? `${pp} does not divide ${S}` :
+                                `${(S/pp)**2} patches — too many to draw here`);
+    b.classList.toggle("on", pp===state.patch);
+  });
+}
+function renderExplode(){
+  const box=document.getElementById("explode"), g=G(), gap=state.exploded?5:0;
+  box.innerHTML="";
+  const cell=100/g;
+  for(let i=0;i<g*g;i++){
+    const r=Math.floor(i/g), c=i%g, d=document.createElement("div");
+    d.className="tile"+(state.hot===i?" hot":""); d.dataset.i=i;
+    const sz=cell-(state.exploded?gap/g:0);
+    d.style.cssText=`left:${c*cell+(state.exploded?c*gap/g:0)}%;top:${r*cell+(state.exploded?r*gap/g:0)}%;
+      width:${sz}%;height:${sz}%`;
+    d.appendChild(patchCanvas(i));
+    box.appendChild(d);
+  }
+}
+function renderStrip(){
+  const s=document.getElementById("strip"); s.innerHTML="";
+  for(let i=0;i<N();i++){
+    const d=document.createElement("div");
+    d.className="cell"+(state.hot===i?" hot":""); d.dataset.i=i;
+    d.appendChild(patchCanvas(i,38));
+    const ix=document.createElement("div"); ix.className="ix"; ix.textContent=i;
+    d.appendChild(ix); s.appendChild(d);
+  }
+}
+function bars(el, vals, color){
+  el.innerHTML=""; const mx=Math.max(...vals.map(Math.abs))||1;
+  vals.forEach(v=>{ const i=document.createElement("i");
+    i.style.background=color; i.style.opacity=(0.15+0.85*Math.abs(v)/mx).toFixed(3);
+    el.appendChild(i); });
+}
+function renderPick(){
+  const i=Math.min(state.query, N()-1);
+  document.getElementById("pickLbl").textContent="#"+i;
+  const pb=document.getElementById("pickBox"); pb.innerHTML="";
+  const cv=patchCanvas(i); cv.style.width=cv.style.height="96px"; pb.appendChild(cv);
+
+  // raw pixel trace
+  const g=G(), p=state.patch, r=Math.floor(i/g), c=i%g, vals=[];
+  for(let y=0;y<p;y++) for(let x=0;x<p;x++){
+    const o=((r*p+y)*S+(c*p+x))*4;
+    for(let ch=0;ch<3;ch++) vals.push((PIX[o+ch]/255-.5)/.5);
+  }
+  const w=document.getElementById("rawWave"), ctx=w.getContext("2d");
+  ctx.clearRect(0,0,w.width,w.height);
+  ctx.strokeStyle=getComputedStyle(document.body).getPropertyValue("--pix").trim();
+  ctx.lineWidth=1; ctx.beginPath();
+  vals.forEach((v,k)=>{ const x=k/(vals.length-1)*w.width, y=w.height/2-v*(w.height/2-3);
+    k?ctx.lineTo(x,y):ctx.moveTo(x,y); });
+  ctx.stroke();
+
+  const f=patchFeature(i), rnd=mulberry32(77);
+  const proj=[]; for(let k=0;k<32;k++){ let s=0; for(let j=0;j<12;j++) s+=f[j]*(rnd()*2-1); proj.push(s); }
+  bars(document.getElementById("featBars"), proj,
+       getComputedStyle(document.body).getPropertyValue("--pix").trim());
+  bars(document.getElementById("posBars"), posFeature(i).concat(posFeature(i)).slice(0,32),
+       getComputedStyle(document.body).getPropertyValue("--word").trim());
+  document.getElementById("pickPatch").max=N()-1;
+  gridSvg(document.getElementById("attGrid"), true);
+}
+function renderHeads(){
+  const box=document.getElementById("heads"); box.innerHTML="";
+  const g=G(), n=N(), q=Math.min(state.query,n-1);
+  let spread=0;
+  for(let h=0;h<HEADS;h++){
+    const A=attention(h), row=A[q], mx=Math.max(...row);
+    spread=Math.max(spread,mx);
+    const card=document.createElement("div"); card.className="headcard";
+    card.innerHTML=`<div class="hl">head ${h}</div>`;
+    const grid=document.createElement("div");
+    grid.className="mgrid"; grid.style.gridTemplateColumns=`repeat(${g},1fr)`;
+    row.forEach((v,j)=>{ const c=document.createElement("div"); c.className="c";
+      c.style.background=heatColor(v/mx);
+      c.style.color = v/mx>.55 ? "#fff" : "rgba(60,70,75,.85)";
+      if(n<=16) c.textContent=v.toFixed(2).slice(1);
+      if(j===q) c.style.outline="2px solid var(--ink)";
+      c.title=`patch ${q} → patch ${j}: ${(v*100).toFixed(1)}%`;
+      grid.appendChild(c); });
+    card.appendChild(grid); box.appendChild(card);
+  }
+  document.getElementById("attNote").innerHTML =
+    `Each grid <em>is</em> the patch grid. Every row sums to 1.00 — uniform would be
+     <b>${(1/n).toFixed(3)}</b> in every cell; the strongest weight here is
+     <b>${spread.toFixed(3)}</b>. The four heads disagree, and that is the point.`;
+  document.getElementById("posToggle").textContent =
+    "position embeddings: " + (state.addPos ? "on" : "off");
+  document.getElementById("posToggle").classList.toggle("on", state.addPos);
+}
+function renderBlocks(){
+  const box=document.getElementById("blocks");
+  const sh=`[${N()}, 64]`;
+  const steps=[["patch embedding",sh,"pixels became tokens"],
+               ["block 0",sh,"attention + MLP, residual"],
+               ["block 1",sh,"attention + MLP, residual"],
+               ["block 2",sh,"attention + MLP, residual"],
+               ["block 3",sh,"attention + MLP, residual"],
+               ["LayerNorm",sh,"every patch has now seen the whole image"]];
+  box.innerHTML = steps.map(([a,b,c],i)=>`
+    <div style="display:flex;gap:12px;align-items:baseline;padding:7px 0;
+      ${i?'border-top:1px dashed var(--line)':''}">
+      <span class="shape" style="min-width:118px;text-align:center">${a}</span>
+      <span class="arw mono" style="color:var(--muted)">→</span>
+      <span class="shape" style="background:var(--pix-wash);color:var(--pix);border-color:transparent">${b}</span>
+      <span style="font-size:12.5px;color:var(--muted)">${c}</span>
+    </div>`).join("");
+}
+function renderBridge(){
+  const L=document.getElementById("bLeft"), R=document.getElementById("bRight");
+  const total=N(), n=Math.min(total,16), out = state.connector==="mlp" ? n : 8;
+  const pix=getComputedStyle(document.body).getPropertyValue("--pix").trim();
+  const word=getComputedStyle(document.body).getPropertyValue("--word").trim();
+  L.innerHTML=""; R.innerHTML="";
+  for(let i=0;i<n;i++){
+    const d=document.createElement("div"); d.className="bvec";
+    d.innerHTML=`<span class="lb">P${i}</span><div class="bars"></div>`;
+    bars(d.querySelector(".bars"), patchFeature(i).concat(patchFeature(i)).slice(0,16), pix);
+    L.appendChild(d);
+  }
+  const rnd=mulberry32(9);
+  for(let i=0;i<out;i++){
+    const d=document.createElement("div"); d.className="bvec";
+    d.innerHTML=`<span class="lb">T${i}</span><div class="bars"></div>`;
+    const v=[]; for(let k=0;k<24;k++) v.push(rnd()*2-1);
+    bars(d.querySelector(".bars"), v, word);
+    R.appendChild(d);
+  }
+  document.getElementById("bMid").innerHTML =
+    state.connector==="mlp" ? "Linear<br>GELU<br>Linear" : "cross<br>attention<br>8 learned<br>queries";
+  document.getElementById("sh-bridge").textContent =
+    `[${state.connector==="mlp"?total:8}, 128]` + (total>16 ? "" : "");
+  document.getElementById("bridgeNote").innerHTML = state.connector==="mlp"
+    ? `<b>One patch in, one token out.</b> Token <i>k</i> still <em>means</em> patch <i>k</i> —
+       which is exactly why you can paint the model's attention back onto the picture.
+       Cost: <b>${total}</b> tokens of context, every image.` +
+      (total>16 ? ` <span style="opacity:.8">(showing the first 16 of ${total})</span>` : "")
+    : `<b>Every output pulls from every patch.</b> ${total} → 8 tokens, a
+       ${Math.round(100-100*8/total)}% cut in context. But token <i>k</i> no longer maps to any
+       one place in the image, so you trade interpretability and fine detail for length.` +
+      (total>16 ? ` <span style="opacity:.8">(showing the first 16 inputs of ${total})</span>` : "");
+  requestAnimationFrame(drawBridgeLines);
+}
+function drawBridgeLines(){
+  const svg=document.getElementById("blines"), box=document.getElementById("bridge");
+  const b=box.getBoundingClientRect();
+  svg.setAttribute("viewBox",`0 0 ${b.width} ${b.height}`);
+  const L=[...document.querySelectorAll("#bLeft .bvec")], R=[...document.querySelectorAll("#bRight .bvec")];
+  const pt=el=>{const r=el.getBoundingClientRect();return [r.right-b.left, r.top-b.top+r.height/2];};
+  const pr=el=>{const r=el.getBoundingClientRect();return [r.left-b.left, r.top-b.top+r.height/2];};
+  let h="";
+  L.forEach((l,i)=>{
+    const [x1,y1]=pt(l);
+    const targets = state.connector==="mlp" ? [R[i]] : R;
+    targets.forEach(t=>{ if(!t) return; const [x2,y2]=pr(t);
+      const op = state.connector==="mlp" ? .5 : .12;
+      h+=`<path d="M${x1} ${y1} C ${x1+30} ${y1}, ${x2-30} ${y2}, ${x2} ${y2}"
+           fill="none" stroke="var(--muted)" stroke-width="1" opacity="${op}"/>`; });
+  });
+  svg.innerHTML=h;
+}
+function renderSeq(){
+  const n=N(), words=captionWords();
+  const toks=[]; for(let i=0;i<n;i++) toks.push({t:`IMG${i}`, img:true});
+  ["<bos>",...words,"<eos>"].forEach(w=>toks.push({t:w,img:false}));
+  const seq=document.getElementById("seq"); seq.innerHTML="";
+  toks.forEach((tk,i)=>{ const d=document.createElement("button");
+    d.className="tok "+(tk.img?"img":"txt"); d.dataset.i=i;
+    d.innerHTML=`${tk.t}<span class="p">${i}</span>`; seq.appendChild(d); });
+
+  const ls=document.getElementById("lossSeq"); ls.innerHTML="";
+  toks.forEach((tk,i)=>{ const d=document.createElement("span");
+    const trained = !tk.img && tk.t!=="<bos>";
+    d.className="tok "+(tk.img?"img":"txt")+(trained?"":" dim");
+    d.innerHTML=`${tk.t}<span class="p">${trained?"loss":"—"}</span>`; ls.appendChild(d); });
+  window.__toks=toks;
+}
+function renderRecap(){
+  const n=N(), p=state.patch, d=p*p*3;
+  const t=captionWords().length+2, m=state.connector==="mlp"?n:8;
+  const rows=[
+    ["the image", `[3, ${S}, ${S}]`, `${(S*S*3).toLocaleString()} raw numbers`],
+    ["patchify", `[${n}, ${d}]`, "pure re-arranging — no parameters, nothing lost"],
+    ["patch embedding", `[${n}, 64]`, `Linear(${d}→64) + learned position embedding`],
+    ["ViT ×4 blocks", `[${n}, 64]`, "shape unchanged; every patch has seen the others"],
+    ["connector", `[${m}, 128]`, state.connector==="mlp"
+        ? "64 → 128, one token per patch" : `64 → 128, ${n} patches squeezed into 8`],
+    ["+ caption embeddings", `[${m}+${t}, 128]`, "torch.cat — one sequence, two origins"],
+    ["LLM ×4 causal blocks", `[${m}+${t}, 128]`, "unchanged from the text-only model"],
+    ["lm_head", `[${m}+${t}, vocab]`, "a score per vocabulary word, at every position"],
+    ["loss", "scalar", `cross-entropy on the ${Math.max(t-1,0)} caption positions only`],
+  ];
+  document.getElementById("recap").innerHTML = rows.map(([a,b,c])=>
+    `<tr><td>${a}</td><td class="m">${b}</td><td style="color:var(--muted)">${c}</td></tr>`).join("");
+}
+function renderAll(){
+  renderSource(); renderPicture(); renderExplode(); renderStrip();
+  renderPick(); renderHeads(); renderBlocks(); renderBridge(); renderSeq(); renderRecap();
+}
+
+/* ============================================================
+   Events
+   ============================================================ */
+const capIn=document.getElementById("capIn");
+const pc=document.getElementById("presetCtl");
+PRESETS.forEach((p,i)=>{ const b=document.createElement("button");
+  b.textContent=`${p.color} ${p.shape}`;
+  b.onclick=()=>{ UPLOAD=null; state.preset=i; capIn.value=p.words.join(" ");
+                  state.query=Math.min(state.query,N()-1); renderAll(); };
+  pc.appendChild(b); });
+
+/* ---- the user's own image ------------------------------------------------
+   Read locally with a FileReader and drawn straight into the 64x64 (or 96/128)
+   source canvas. Nothing is uploaded; there is no server in this page. */
+function loadFile(file){
+  if(!file || !file.type.startsWith("image/")) return;
+  const fr=new FileReader();
+  fr.onload=()=>{ const img=new Image();
+    img.onload=()=>{ UPLOAD=img;
+      if(PRESETS.some(p=>p.words.join(" ")===capIn.value.trim()))
+        capIn.value="a photo of";
+      state.query=Math.min(state.query,N()-1);
+      renderAll();
+      document.getElementById("patchify").scrollIntoView({behavior:"smooth",block:"start"});
+    };
+    img.src=fr.result; };
+  fr.readAsDataURL(file);
+}
+document.getElementById("fileIn").onchange=e=>loadFile(e.target.files[0]);
+const drop=document.getElementById("drop");
+["dragenter","dragover"].forEach(ev=>drop.addEventListener(ev,e=>{
+  e.preventDefault(); drop.classList.add("over"); }));
+["dragleave","drop"].forEach(ev=>drop.addEventListener(ev,e=>{
+  e.preventDefault(); drop.classList.remove("over"); }));
+drop.addEventListener("drop",e=>loadFile(e.dataTransfer.files[0]));
+document.addEventListener("paste",e=>{
+  const it=[...(e.clipboardData?.items||[])].find(i=>i.type.startsWith("image/"));
+  if(it) loadFile(it.getAsFile());
+});
+capIn.addEventListener("input", ()=>{ renderSeq(); renderRecap(); });
+
+document.getElementById("sizeSel").onclick=e=>{
+  const b=e.target.closest("button"); if(!b) return;
+  S=+b.dataset.s;
+  // keep the patch size legal for the new resolution
+  if(S%state.patch || (S/state.patch)**2 > 64){
+    state.patch=[8,16,32].find(p=>S%p===0 && (S/p)**2<=64) || 32;
+  }
+  state.query=0; renderAll();
+};
+document.getElementById("patchSel").onclick=e=>{
+  const b=e.target.closest("button"); if(!b || b.disabled) return;
+  state.patch=+b.dataset.p; state.query=Math.min(state.query, N()-1); renderAll();
+};
+document.getElementById("explodeBtn").onclick=()=>{ state.exploded=!state.exploded; renderExplode(); };
+document.getElementById("explode").onmouseover=e=>{
+  const t=e.target.closest(".tile"); if(!t) return;
+  state.hot=+t.dataset.i; syncHot();
+};
+document.getElementById("explode").onmouseleave=()=>{ state.hot=-1; syncHot(); };
+document.getElementById("strip").onmouseover=e=>{
+  const c=e.target.closest(".cell"); if(!c) return; state.hot=+c.dataset.i; syncHot();
+};
+document.getElementById("strip").onmouseleave=()=>{ state.hot=-1; syncHot(); };
+function syncHot(){
+  document.querySelectorAll("#explode .tile").forEach(t=>
+    t.classList.toggle("hot", +t.dataset.i===state.hot));
+  document.querySelectorAll("#strip .cell").forEach(t=>
+    t.classList.toggle("hot", +t.dataset.i===state.hot));
+}
+document.getElementById("pickPatch").oninput=e=>{ state.query=+e.target.value; renderPick(); renderHeads(); };
+document.getElementById("attGrid").onclick=e=>{
+  const r=e.target.closest("rect"); if(!r) return;
+  state.query=+r.dataset.i; document.getElementById("pickPatch").value=state.query;
+  renderPick(); renderHeads();
+};
+document.getElementById("posToggle").onclick=()=>{ state.addPos=!state.addPos; renderHeads(); };
+document.getElementById("connSel").onclick=e=>{
+  const b=e.target.closest("button"); if(!b) return;
+  state.connector=b.dataset.c;
+  document.querySelectorAll("#connSel button").forEach(x=>x.classList.toggle("on",x===b));
+  renderBridge(); renderRecap();
+};
+document.getElementById("seq").onclick=e=>{
+  const b=e.target.closest(".tok"); if(!b) return;
+  const i=+b.dataset.i, toks=window.__toks;
+  document.querySelectorAll("#seq .tok").forEach((t,j)=>{
+    t.classList.toggle("dim", j>i); t.classList.toggle("sel", j===i); });
+  const nImg=toks.filter(t=>t.img).length;
+  document.getElementById("seqNote").innerHTML = toks[i].img
+    ? `Position <b>${i}</b> is an <b>image</b> token. It can attend to positions 0–${i} —
+       other image tokens only. It is never a prediction target.`
+    : `Position <b>${i}</b> holds <b>${toks[i].t}</b>. It attends to positions 0–${i}:
+       <b>all ${nImg} image tokens</b> plus ${i-nImg} earlier words. It is asked to predict
+       <b>${toks[i+1] ? toks[i+1].t : "nothing — it's the last one"}</b>.`;
+};
+window.addEventListener("resize", ()=>requestAnimationFrame(drawBridgeLines));
+
+/* rail highlight */
+const obs=new IntersectionObserver(es=>{ es.forEach(en=>{
+  if(en.isIntersecting) document.querySelectorAll("#rail a").forEach(a=>
+    a.classList.toggle("on", a.dataset.id===en.target.id)); });
+}, {rootMargin:"-45% 0px -50% 0px"});
+STAGES.forEach(s=>{ const el=document.getElementById(s.id); if(el) obs.observe(el); });
+
+capIn.value = PRESETS[state.preset].words.join(" ");
+renderAll();
+</script>
+</body>
+</html>
